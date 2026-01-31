@@ -1,6 +1,7 @@
 {
     "domain": "helios_vallox_ventilation",
     "name": "Helios Pro / Vallox SE Ventilation",
+	"config_flow": true,
     "codeowners": ["@Tom-Bom-badil"],
     "dependencies": [],
     "documentation": "https://github.com/Tom-Bom-badil/home-assistant_helios-vallox/wiki",
