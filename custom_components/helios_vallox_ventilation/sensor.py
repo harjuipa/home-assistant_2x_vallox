@@ -1,31 +1,32 @@
 import logging
-from homeassistant.helpers.entity import Entity
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.components.sensor import SensorEntity
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
+
 from .const import DOMAIN
 
-# _LOGGER = logging.getLogger(__name__)
 _LOGGER = logging.getLogger("helios_vallox.sensor")
 
-# platform setup
-async def async_setup_platform(hass, config, async_add_entities, discovery_info=None):
-    if discovery_info is None:
-        return
-    coordinator = hass.data[DOMAIN]["coordinator"]
+
+async def async_setup_entry(hass, entry, async_add_entities):
+    """Set up sensors for one Vallox device (AK or YK)."""
+
+    data = hass.data[DOMAIN][entry.entry_id]
+    coordinator = data["coordinator"]
+    prefix = data["prefix"]  # "yk" or "ak"
+
     entities = []
-    sensor_config = discovery_info.get("sensors", [])
-    for sensor in sensor_config:
-        name = sensor.get("name")
-        if not name:
-            _LOGGER.warning("Sensor configuration missing 'name'. Skipping entry.")
-            continue
+
+    # Sensors are defined inside the coordinator
+    for sensor in coordinator.sensors:
+        name = sensor["name"]
+
         entities.append(
             HeliosSensor(
-                name=name,
-                variable=name,
                 coordinator=coordinator,
+                variable=name,
+                prefix=prefix,
+                entry=entry,
                 icon=sensor.get("icon"),
-                unique_id=f"ventilation_{name}",
                 description=sensor.get("description"),
                 unit_of_measurement=sensor.get("unit_of_measurement"),
                 device_class=sensor.get("device_class"),
@@ -35,18 +36,20 @@ async def async_setup_platform(hass, config, async_add_entities, discovery_info=
                 factory_setting=sensor.get("factory_setting"),
             )
         )
-    async_add_entities(entities)
-    hass.data.setdefault("ventilation_entities", []).extend(entities)
 
-# sensor class
+    async_add_entities(entities)
+
+
 class HeliosSensor(CoordinatorEntity, SensorEntity):
+    """Representation of a single Vallox sensor."""
+
     def __init__(
         self,
-        name,
-        variable,
         coordinator,
+        variable,
+        prefix,
+        entry,
         icon=None,
-        unique_id=None,
         description=None,
         unit_of_measurement=None,
         device_class=None,
@@ -56,24 +59,29 @@ class HeliosSensor(CoordinatorEntity, SensorEntity):
         factory_setting=None,
     ):
         super().__init__(coordinator.coordinator)
-        self._attr_name = f"Ventilation {name}"
-        self._variable = variable
+
         self._coordinator = coordinator
+        self._variable = variable
+        self._prefix = prefix
+        self._entry = entry
+
+        self._attr_name = f"Vallox {prefix.upper()} {variable}"
+        self._attr_unique_id = f"vallox_{prefix}_{variable}"
+
         self._attr_icon = icon
-        self._attr_unique_id = unique_id
         self._attr_description = description
         self._attr_native_unit_of_measurement = unit_of_measurement
         self._attr_device_class = device_class
         self._attr_state_class = state_class
+
         self._attr_min_value = min_value
         self._attr_max_value = max_value
         self._attr_factory_setting = factory_setting
 
     @property
     def native_value(self):
-        return self.coordinator.data.get(self._variable)
+        return self._coordinator.data.get(self._variable)
 
-    # additional state attributes
     @property
     def extra_state_attributes(self):
         attributes = {
@@ -84,11 +92,10 @@ class HeliosSensor(CoordinatorEntity, SensorEntity):
         }
         return {k: v for k, v in attributes.items() if v is not None}
 
-    # add entity
-    async def async_added_to_hass(self):
-        await super().async_added_to_hass()
-        self.async_write_ha_state()
-
-    # update entity
-    def _handle_coordinator_update(self):
-        super()._handle_coordinator_update()
+    @property
+    def device_info(self):
+        return {
+            "identifiers": {(DOMAIN, self._entry.entry_id)},
+            "name": self._entry.data["name"],
+            "manufacturer": "Vallox",
+        }
