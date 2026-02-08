@@ -12,13 +12,23 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
     data = hass.data[DOMAIN][entry.entry_id]
     coordinator = data["coordinator"]
-    prefix = data["prefix"]  # "yk" or "ak"
+    prefix = data["prefix"]
+    user_conf = data.get("user_conf", {})
+
+    sensor_config = user_conf.get("sensors", [])
+
+    if not sensor_config:
+        _LOGGER.warning(
+            "No sensors defined in user_conf.yaml for %s", entry.data["name"]
+        )
+        return
 
     entities = []
 
-    # Sensors are defined inside the coordinator
-    for sensor in coordinator.sensors:
-        name = sensor["name"]
+    for sensor in sensor_config:
+        name = sensor.get("name")
+        if not name:
+            continue
 
         entities.append(
             HeliosSensor(
@@ -80,7 +90,9 @@ class HeliosSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def native_value(self):
-        return self._coordinator.data.get(self._variable)
+        if not self._coordinator.coordinator.data:
+            return None
+        return self._coordinator.coordinator.data.get(self._variable)
 
     @property
     def extra_state_attributes(self):

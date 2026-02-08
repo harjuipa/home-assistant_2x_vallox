@@ -41,6 +41,7 @@ class HeliosBase:
         self._socket = None
         self._lock = threading.Lock()
         self._all_values, self._cache = {}, {}
+        self._last_write = 0
 
     ###### Exposed functions (used from outside) ###############################
 
@@ -81,13 +82,24 @@ class HeliosBase:
 
     # writes a single variable to the ventilation, including plausability checks
     def writeValue(self, varname, value):
+
+        # Vallox requires bus idle time between writes
+        now = time.time()
+        elapsed = now - self._last_write
+        if elapsed < 0.8:
+            time.sleep(0.8 - elapsed)
+
         if not self._connect() or not self._validateBeforeWrite(varname, value):
             return False
+
         self._lock.acquire()
         try:
-            return self._performWrite(varname, value)
+            result = self._performWrite(varname, value)
+            self._last_write = time.time()
+            return result
         except Exception as e:
             self.logger.error(f"Exception in _writeValue(): {e}")
+            return False
         finally:
             self._lock.release()
             self._disconnect()
@@ -159,28 +171,44 @@ class HeliosBase:
     # write to a single register
     def _performWrite(self, varname, value):
         try:
-            # preparations
             vardef = REGISTERS_AND_COILS[varname]
+
             if vardef["type"] == "bit":
                 currentval = self._cache.get(vardef["varid"])
             else:
                 currentval = None
+
             rawvalue = self._convertToRaw(varname, value, currentval)
             if rawvalue is None:
                 self.logger.error(f"Writing failed: Cannot convert {value}.")
                 return False
+
             sender, receiver = BUS_ADDRESSES["_HA"], BUS_ADDRESSES["MB1"]
             register = vardef["varid"]
-            # the actual write
+
             self.logger.info(f"Writing {value} to {varname}")
-            self._sendTelegram(sender, receiver, register, rawvalue)
-            self._all_values[varname] = value   # update entities and bitcache
+
+            # SEND WRITE
+            if not self._sendTelegram(sender, receiver, register, rawvalue):
+                return False
+
+            # IMPORTANT: read ACK so next write works
+            ack = self._receiveTelegram(receiver, sender, register)
+            if ack is None:
+                self.logger.warning("Write ACK not received")
+                return False
+
+            self._all_values[varname] = value
             if vardef["type"] == "bit":
                 self._cache[vardef["varid"]] = rawvalue
+
             return True
+
         except Exception as e:
             self.logger.error(f"Exception in _performWrite(): {e}")
             return False
+
+
 
     ###### Internal functions (lower layers) ###################################
 
@@ -305,45 +333,35 @@ class HeliosBase:
 
     # Plausibility checks before writing to the bus
     def _validateBeforeWrite(self, varname, value):
-        # Check for valid variable name
-        if REGISTERS_AND_COILS.get(varname) is None:
+        """Validate write request without depending on Home Assistant entity state."""
+
+        vardef = REGISTERS_AND_COILS.get(varname)
+
+        # variable must exist
+        if vardef is None:
             self.logger.error(f"Writing stopped: Invalid variable '{varname}'.")
             return False
-        # Prevent writing to register 06h (may cause irrepairable damage)
-        if REGISTERS_AND_COILS[varname]["varid"] == 0x06:
+
+        # prevent dangerous register
+        if vardef["varid"] == 0x06:
             self.logger.critical("Writing stopped: 06h writes are prohibited.")
             return False
-        # Prevent writing read-only variables
-        if REGISTERS_AND_COILS[varname]["write"] != True:
+
+        # must be writable
+        if vardef.get("write") != True:
             self.logger.error(f"Writing stopped: '{varname}' is read-only.")
             return False
-        # Make sure value is int or bool
-        if not isinstance(value, (int, bool)):
-            if REGISTERS_AND_COILS[varname]["type"] == "bit":
-                if value in ['1', True, 'True', 'true', 'On', 'on', 'ON'] or \
-                value in ['0', False, 'False', 'false', 'Off', 'off', 'OFF']:
-                    self.logger.debug(f"Valid bool '{value}' detected.")
-                else:
-                    self.logger.error(f"Writing stopped: '{value}' is not a bool.")
-                    return False
-            else:
+
+        # type validation only (no HA entity dependency!)
+        if vardef["type"] == "bit":
+            if str(value).lower() not in {"true", "1", "on", "false", "0", "off"}:
+                self.logger.error(f"Writing stopped: '{value}' is not a bool.")
+                return False
+        else:
+            if not isinstance(value, int):
                 self.logger.error(f"Writing stopped: '{value}' is not an integer.")
                 return False
-        # Check if value is within allowed limits (HA only, not at CLI!)
-        if self._hass:
-            entity = self._hass.states.get(f"sensor.ventilation_{varname}")
-            if entity:
-                min_value = entity.attributes.get("min_value")
-                max_value = entity.attributes.get("max_value")
-                min_value = int(min_value) if isinstance(min_value, (int, float)) else None
-                max_value = int(max_value) if isinstance(max_value, (int, float)) else None
-                self.logger.debug(f"Validating '{varname}': value={value}, min={min_value}, max={max_value}")
-                if min_value is not None and int(value) < min_value:
-                    self.logger.error(f"Writing stopped: {value} below min of {min_value}.")
-                    return False
-                if max_value is not None and int(value) > max_value:
-                    self.logger.error(f"Writing stopped: {value} above max of {max_value}.")
-                    return False
+
         return True
 
 ###### for CLI (command line) testing only #####################################

@@ -12,12 +12,24 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
     data = hass.data[DOMAIN][entry.entry_id]
     coordinator = data["coordinator"]
-    prefix = data["prefix"]  # "yk" or "ak"
+    prefix = data["prefix"]
+    user_conf = data.get("user_conf", {})
+
+    binary_sensor_config = user_conf.get("binary_sensors", [])
+
+    if not binary_sensor_config:
+        _LOGGER.warning(
+            "No binary_sensors defined in user_conf.yaml for %s",
+            entry.data["name"],
+        )
+        return
 
     entities = []
 
-    for sensor in coordinator.binary_sensors:
-        name = sensor["name"]
+    for sensor in binary_sensor_config:
+        name = sensor.get("name")
+        if not name:
+            continue
 
         entities.append(
             HeliosBinarySensor(
@@ -25,13 +37,13 @@ async def async_setup_entry(hass, entry, async_add_entities):
                 variable=name,
                 prefix=prefix,
                 entry=entry,
-                icon=sensor.get("icon"),
                 description=sensor.get("description"),
                 device_class=sensor.get("device_class"),
+                icon=sensor.get("icon"),
             )
         )
 
-    async_add_entities(entities)
+    async_add_entities(entities, update_before_add=True)
 
 
 class HeliosBinarySensor(CoordinatorEntity, BinarySensorEntity):
@@ -43,9 +55,9 @@ class HeliosBinarySensor(CoordinatorEntity, BinarySensorEntity):
         variable,
         prefix,
         entry,
-        icon=None,
         description=None,
         device_class=None,
+        icon=None,
     ):
         super().__init__(coordinator.coordinator)
 
@@ -57,13 +69,15 @@ class HeliosBinarySensor(CoordinatorEntity, BinarySensorEntity):
         self._attr_name = f"Vallox {prefix.upper()} {variable}"
         self._attr_unique_id = f"vallox_{prefix}_{variable}"
 
-        self._attr_icon = icon
         self._attr_description = description
         self._attr_device_class = device_class
+        self._attr_icon = icon
 
     @property
     def is_on(self):
-        return bool(self._coordinator.data.get(self._variable))
+        if not self._coordinator.coordinator.data:
+            return False
+        return bool(self._coordinator.coordinator.data.get(self._variable))
 
     @property
     def device_info(self):

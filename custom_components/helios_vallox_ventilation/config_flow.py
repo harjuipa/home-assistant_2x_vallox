@@ -1,10 +1,12 @@
 from homeassistant import config_entries
 import voluptuous as vol
 
-DOMAIN = "helios_vallox"
+DOMAIN = "helios_vallox_ventilation"
 
 
-class HeliosValloxConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+    """Handle a config flow for Helios Vallox Ventilation."""
+
     VERSION = 1
 
     async def async_step_user(self, user_input=None):
@@ -14,14 +16,15 @@ class HeliosValloxConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 data=user_input,
             )
 
-        schema = vol.Schema({
-            vol.Required(
-                "name",
-                default="Vallox YK"
-            ): vol.In(["Vallox YK", "Vallox AK"]),
-            vol.Required("host"): str,
-            vol.Required("port", default=502): int,
-        })
+        schema = vol.Schema(
+            {
+                vol.Required("name", default="Vallox YK"): vol.In(
+                    ["Vallox YK", "Vallox AK"]
+                ),
+                vol.Required("host"): str,
+                vol.Required("port", default=502): int,
+            }
+        )
 
         return self.async_show_form(
             step_id="user",

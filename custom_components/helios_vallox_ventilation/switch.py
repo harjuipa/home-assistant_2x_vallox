@@ -12,12 +12,24 @@ async def async_setup_entry(hass, entry, async_add_entities):
 
     data = hass.data[DOMAIN][entry.entry_id]
     coordinator = data["coordinator"]
-    prefix = data["prefix"]  # "yk" or "ak"
+    prefix = data["prefix"]
+    user_conf = data.get("user_conf", {})
+
+    switch_config = user_conf.get("switches", [])
+
+    if not switch_config:
+        _LOGGER.warning(
+            "No switches defined in user_conf.yaml for %s",
+            entry.data["name"],
+        )
+        return
 
     entities = []
 
-    for switch in coordinator.switches:
-        name = switch["name"]
+    for switch in switch_config:
+        name = switch.get("name")
+        if not name:
+            continue
 
         entities.append(
             HeliosSwitch(
@@ -25,12 +37,12 @@ async def async_setup_entry(hass, entry, async_add_entities):
                 variable=name,
                 prefix=prefix,
                 entry=entry,
-                icon=switch.get("icon"),
                 description=switch.get("description"),
+                icon=switch.get("icon"),
             )
         )
 
-    async_add_entities(entities)
+    async_add_entities(entities, update_before_add=True)
 
 
 class HeliosSwitch(CoordinatorEntity, SwitchEntity):
@@ -42,8 +54,8 @@ class HeliosSwitch(CoordinatorEntity, SwitchEntity):
         variable,
         prefix,
         entry,
-        icon=None,
         description=None,
+        icon=None,
     ):
         super().__init__(coordinator.coordinator)
 
@@ -55,13 +67,22 @@ class HeliosSwitch(CoordinatorEntity, SwitchEntity):
         self._attr_name = f"Vallox {prefix.upper()} {variable}"
         self._attr_unique_id = f"vallox_{prefix}_{variable}"
 
-        self._attr_icon = icon
         self._attr_description = description
-        self._attr_is_on = None
+        self._attr_icon = icon
 
     @property
     def is_on(self):
-        return bool(self._coordinator.data.get(self._variable))
+        if not self._coordinator.coordinator.data:
+            return False
+        return bool(self._coordinator.coordinator.data.get(self._variable))
+
+    async def async_turn_on(self, **kwargs):
+        await self._coordinator.turn_on(self._variable)
+        self.async_write_ha_state()
+
+    async def async_turn_off(self, **kwargs):
+        await self._coordinator.turn_off(self._variable)
+        self.async_write_ha_state()
 
     @property
     def device_info(self):
@@ -70,19 +91,3 @@ class HeliosSwitch(CoordinatorEntity, SwitchEntity):
             "name": self._entry.data["name"],
             "manufacturer": "Vallox",
         }
-
-    def _handle_coordinator_update(self):
-        new_value = self._coordinator.data.get(self._variable)
-        if new_value is not None:
-            self._attr_is_on = new_value is True or new_value == "on"
-        self.async_write_ha_state()
-
-    async def async_turn_on(self, **kwargs):
-        await self._coordinator.turn_on(self._variable)
-        self._attr_is_on = True
-        self.async_write_ha_state()
-
-    async def async_turn_off(self, **kwargs):
-        await self._coordinator.turn_off(self._variable)
-        self._attr_is_on = False
-        self.async_write_ha_state()
