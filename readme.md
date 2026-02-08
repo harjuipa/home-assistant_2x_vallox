@@ -13,7 +13,7 @@ so installation to HA is manual:<br/>
 - Copy all files to 'helios_vallox_ventilation'<br/>
 - Restart HA<br/>
 - Go to Settings > Devices & services > Integrations<br/>
-- Find 'Helios Pro/Vallox SE Ventilation' open and 'Add entry' for both machines<br/>
+- Find 'Helios Pro/Vallox SE Ventilation' open and 'Add entry' for both equipments<br/>
 - There will be two of them _YK & _AK = Yläkerta ja Alakerta = Upstairs and Downstairs<br/>
 <br/>
 
